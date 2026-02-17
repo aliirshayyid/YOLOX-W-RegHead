@@ -226,3 +226,5 @@ events.out.tfevents*
 .Trashes
 ehthumbs.db
 Thumbs.db
+/yolox/data/stopsigns/images
+/runs/results

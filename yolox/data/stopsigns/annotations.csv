@@ -1,0 +1,11 @@
+image_path,x_min,y_min,x_max,y_max,class,distance_m
+images/img001.jpg,69,74,1200,1205,stop_sign,7.1
+images/img002.jpg,236,186,1168,1244,stop_sign,7.4
+images/img003.jpg,224,38,836,711,stop_sign,9.7
+images/img004.jpg,594,95,714,230,stop_sign,35.0
+images/img005.jpg,189,20,457,289,stop_sign,19.2
+images/img006.jpg,42,35,750,754,stop_sign,9.3
+images/img007.jpg,1445,657,2970,2323,stop_sign,5.9
+images/img008.jpg,996,0,1849,1884,stop_sign,5.6
+images/img009.jpg,1209,668,2425,1891,stop_sign,6.9
+images/img010.jpg,3308,125,4356,2733,stop_sign,5.0

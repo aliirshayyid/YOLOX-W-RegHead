@@ -626,7 +626,8 @@ class YOLOXHead(nn.Module):
 
         n_candidate_k = min(10, pair_wise_ious.size(1))
         topk_ious, _ = torch.topk(pair_wise_ious, n_candidate_k, dim=1)
-        dynamic_ks = torch.clamp(topk_ious.sum(1).int(), min=1)
+        # dynamic_ks = torch.clamp(topk_ious.sum(1).int(), min=1)
+        dynamic_ks = torch.clamp(topk_ious.sum(1).int(), min=1, max=pair_wise_ious.size(1))  # only for testing
         for gt_idx in range(num_gt):
             _, pos_idx = torch.topk(
                 cost[gt_idx], k=dynamic_ks[gt_idx], largest=False
@@ -637,7 +638,8 @@ class YOLOXHead(nn.Module):
 
         anchor_matching_gt = matching_matrix.sum(0)
         # deal with the case that one anchor matches multiple ground-truths
-        if anchor_matching_gt.max() > 1:
+        # if anchor_matching_gt.max() > 1:
+        if anchor_matching_gt.numel() > 0 and anchor_matching_gt.max() > 1: # only for testing small datasets
             multiple_match_mask = anchor_matching_gt > 1
             _, cost_argmin = torch.min(cost[:, multiple_match_mask], dim=0)
             matching_matrix[:, multiple_match_mask] *= 0
