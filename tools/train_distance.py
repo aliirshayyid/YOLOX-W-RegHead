@@ -2,6 +2,9 @@
 """
 Train YOLOX distance head on stop sign images.
 
+Only the distance regression branch is trained; the backbone and all
+detection-head branches (cls, reg, obj) stay frozen for the entire run.
+
 Usage:
     python tools/train_distance.py \
         --ckpt weights/yolox_s.pth \
@@ -40,24 +43,57 @@ def build_model(num_classes=80, depth=0.33, width=0.50):
     return model
 
 
-def freeze_detection(model):
-    """Freeze backbone + all head branches EXCEPT distance."""
-    # Freeze backbone (PAFPN)
-    for param in model.backbone.parameters():
+def freeze_all_except_distance(model):
+    """Freeze backbone + all head branches EXCEPT distance — permanently.
+
+    Only freezes requires_grad on parameters.  Does NOT touch train/eval mode
+    here — that is handled in the training loop so that YOLOX.forward() still
+    takes the training (loss-computation) code path.
+    """
+    # ── Freeze every parameter first ──
+    for param in model.parameters():
         param.requires_grad = False
 
-    # Freeze detection head branches
-    for name, param in model.head.named_parameters():
-        if "dist_" not in name:
-            param.requires_grad = False
-        else:
+    # ── Selectively unfreeze only distance-branch parameters ──
+    dist_param_names = []
+    for name, param in model.named_parameters():
+        if "dist_" in name:
             param.requires_grad = True
+            dist_param_names.append(name)
 
-    # Count trainable params
+    if not dist_param_names:
+        logger.error(
+            "No distance-branch parameters found (expected names containing 'dist_'). "
+            "Check that YOLOXHead defines the distance regression layers."
+        )
+        raise RuntimeError("Distance head parameters not found in model.")
+
+    # ── Report ──
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     logger.info(f"Trainable params: {trainable:,} / {total:,} "
-                f"({100*trainable/total:.1f}%)")
+                f"({100 * trainable / total:.2f}%)")
+    logger.info(f"Trainable layers ({len(dist_param_names)}):")
+    for n in dist_param_names:
+        logger.info(f"  {n}")
+
+
+def set_frozen_bn_eval(model):
+    """Set frozen BatchNorm / Dropout layers to eval mode.
+
+    Call this AFTER model.train() each epoch so that:
+      - model.training == True  →  YOLOX.forward() computes losses
+      - frozen BN running_mean/running_var are NOT updated
+      - frozen Dropout stays deterministic
+    """
+    frozen_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d,
+                    nn.SyncBatchNorm, nn.Dropout, nn.Dropout2d)
+    for name, module in model.named_modules():
+        if isinstance(module, frozen_types):
+            # If none of this layer's own parameters are trainable, lock it
+            has_trainable = any(p.requires_grad for p in module.parameters(recurse=False))
+            if not has_trainable:
+                module.eval()
 
 
 def main():
@@ -70,8 +106,6 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--img-size", type=int, default=640)
     parser.add_argument("--output-dir", default="runs/distance_training")
-    parser.add_argument("--unfreeze-epoch", type=int, default=50,
-                        help="Epoch to unfreeze backbone for end-to-end fine-tuning")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -88,10 +122,9 @@ def main():
     model = load_ckpt(model, ckpt)
     logger.info("Loaded pretrained weights (distance layers initialized randomly)")
 
-    # ── Freeze everything except distance branch ──
-    freeze_detection(model)
+    # ── Freeze everything except distance branch — this is permanent ──
+    freeze_all_except_distance(model)
     model.to(args.device)
-    model.train()
 
     # ── Dataset ──
     dataset = StopSignDistanceDataset(
@@ -109,8 +142,8 @@ def main():
     )
     logger.info(f"Dataset: {len(dataset)} images, {len(dataloader)} batches")
 
-    # ── Optimizer (only distance params) ──
-    dist_params = [p for n, p in model.named_parameters() if p.requires_grad]
+    # ── Optimizer (only distance params — the only trainable ones) ──
+    dist_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(dist_params, lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs, eta_min=args.lr * 0.01
@@ -119,23 +152,16 @@ def main():
     # ── Training loop ──
     best_loss = float("inf")
     for epoch in range(args.epochs):
+        # model.train() sets the whole model to training mode so that
+        # YOLOX.forward() takes the loss-computation code path.
+        # Then set_frozen_bn_eval() flips frozen BN/Dropout back to eval
+        # so their running stats and behavior are preserved.
         model.train()
+        set_frozen_bn_eval(model)
+
         epoch_loss = 0.0
         epoch_dist_loss = 0.0
         t0 = time.time()
-
-        # Unfreeze backbone for end-to-end fine-tuning
-        if epoch == args.unfreeze_epoch:
-            logger.info(f"Epoch {epoch}: Unfreezing all parameters for fine-tuning")
-            for param in model.parameters():
-                param.requires_grad = True
-            # Reset optimizer with all params and lower LR
-            optimizer = torch.optim.AdamW(
-                model.parameters(), lr=args.lr * 0.01, weight_decay=1e-4
-            )
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=args.epochs - epoch, eta_min=args.lr * 0.001
-            )
 
         for batch_idx, (imgs, targets) in enumerate(dataloader):
             imgs = imgs.to(args.device)
@@ -148,6 +174,14 @@ def main():
 
             optimizer.zero_grad()
             loss.backward()
+
+            # Safety check: verify frozen params got no gradients
+            # (only on first batch of first epoch for efficiency)
+            if epoch == 0 and batch_idx == 0:
+                for name, param in model.named_parameters():
+                    if not param.requires_grad and param.grad is not None:
+                        logger.warning(f"Frozen param {name} unexpectedly has a gradient!")
+
             optimizer.step()
 
             epoch_loss += loss.item()

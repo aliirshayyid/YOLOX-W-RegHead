@@ -97,10 +97,8 @@ A small example annotation file is provided at `yolox/data/stopsigns/annotations
 
 ## Training the Distance Head
 
-The training script (`tools/train_distance.py`) uses a two-phase strategy:
-
-1. **Phase 1 (epochs 0 → `unfreeze-epoch`):** Only the distance regression branch is trained. The backbone and detection head are frozen, so the pretrained detection performance is preserved.
-2. **Phase 2 (epochs `unfreeze-epoch` → end):** All parameters are unfrozen for end-to-end fine-tuning with a reduced learning rate.
+The training script (`tools/train_distance.py`) **only trains the distance regression branch**. The backbone (PAFPN) and all detection head branches (classification, regression, objectness) are permanently frozen throughout the entire training run. This guarantees that pretrained detection accuracy is fully preserved — only the distance prediction is learned.
+Frozen modules are also set to `eval()` mode so that BatchNorm running statistics and dropout behavior remain unchanged.
 
 ### Basic Training Command
 
@@ -248,7 +246,5 @@ YOLOX/
 ├── weights/                   # Store pretrained weights here
 └── requirements.txt
 ```
-
----
 
 ## Citation
