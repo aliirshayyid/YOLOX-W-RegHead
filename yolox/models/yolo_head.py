@@ -40,6 +40,8 @@ class YOLOXHead(nn.Module):
         self.cls_preds = nn.ModuleList()
         self.reg_preds = nn.ModuleList()
         self.obj_preds = nn.ModuleList()
+        self.dist_convs = nn.ModuleList()    # NEW
+        self.dist_preds = nn.ModuleList()    # NEW
         self.stems = nn.ModuleList()
         Conv = DWConv if depthwise else BaseConv
 
@@ -120,11 +122,42 @@ class YOLOXHead(nn.Module):
                     padding=0,
                 )
             )
+            self.dist_convs.append(
+                nn.Sequential(
+                    *[
+                        Conv(
+                            in_channels=int(256 * width),
+                            out_channels=int(256 * width),
+                            ksize=3,
+                            stride=1,
+                            act=act,
+                        ),
+                        Conv(
+                            in_channels=int(256 * width),
+                            out_channels=int(256 * width),
+                            ksize=3,
+                            stride=1,
+                            act=act,
+                        ),
+                    ]
+                )
+            )
+            self.dist_preds.append(
+                nn.Conv2d(
+                    in_channels=int(256 * width),
+                    out_channels=1,
+                    kernel_size=1,
+                    stride=1,
+                    padding=0,
+                )
+            )
 
         self.use_l1 = False
         self.l1_loss = nn.L1Loss(reduction="none")
         self.bcewithlog_loss = nn.BCEWithLogitsLoss(reduction="none")
         self.iou_loss = IOUloss(reduction="none")
+        self.dist_loss = nn.SmoothL1Loss(reduction="none")    # NEW
+        self.dist_weight = 1.0 # NEW
         self.strides = strides
         self.grids = [torch.zeros(1)] * len(in_channels)
 
@@ -145,6 +178,7 @@ class YOLOXHead(nn.Module):
         x_shifts = []
         y_shifts = []
         expanded_strides = []
+        dist_outputs_list = []  # NEW: to store distance outputs from each level
 
         for k, (cls_conv, reg_conv, stride_this_level, x) in enumerate(
             zip(self.cls_convs, self.reg_convs, self.strides, xin)
@@ -159,6 +193,11 @@ class YOLOXHead(nn.Module):
             reg_feat = reg_conv(reg_x)
             reg_output = self.reg_preds[k](reg_feat)
             obj_output = self.obj_preds[k](reg_feat)
+
+            # NEW: distance branch (shares stem with reg)
+            dist_feat = self.dist_convs[k](reg_x)
+            dist_output = self.dist_preds[k](dist_feat)  # [B, 1, H, W]
+            dist_outputs_list.append(dist_output)
 
             if self.training:
                 output = torch.cat([reg_output, obj_output, cls_output], 1)
@@ -185,7 +224,7 @@ class YOLOXHead(nn.Module):
 
             else:
                 output = torch.cat(
-                    [reg_output, obj_output.sigmoid(), cls_output.sigmoid()], 1
+                    [reg_output, obj_output.sigmoid(), cls_output.sigmoid(), F.relu(dist_output)], 1 # NEW: add dist output with ReLU activation
                 )
 
             outputs.append(output)
@@ -200,10 +239,11 @@ class YOLOXHead(nn.Module):
                 torch.cat(outputs, 1),
                 origin_preds,
                 dtype=xin[0].dtype,
+                dist_outputs=dist_outputs_list,  # NEW
             )
         else:
             self.hw = [x.shape[-2:] for x in outputs]
-            # [batch, n_anchors_all, 85]
+            # outputs now includes distance channel: [reg(4) + obj(1) + cls(nc) + dist(1)]
             outputs = torch.cat(
                 [x.flatten(start_dim=2) for x in outputs], dim=2
             ).permute(0, 2, 1)
@@ -245,11 +285,18 @@ class YOLOXHead(nn.Module):
         grids = torch.cat(grids, dim=1).type(dtype)
         strides = torch.cat(strides, dim=1).type(dtype)
 
-        outputs = torch.cat([
-            (outputs[..., 0:2] + grids) * strides,
-            torch.exp(outputs[..., 2:4]) * strides,
-            outputs[..., 4:]
+        # Last channel is distance — pass through unchanged
+        det_outputs = outputs[..., :-1]    # everything except distance
+        dist_outputs = outputs[..., -1:]   # distance only
+
+        det_outputs = torch.cat([
+            (det_outputs[..., 0:2] + grids) * strides,
+            torch.exp(det_outputs[..., 2:4]) * strides,
+            det_outputs[..., 4:]
         ], dim=-1)
+
+        # Append distance back: final = [cx, cy, w, h, obj, cls..., distance_m]
+        outputs = torch.cat([det_outputs, dist_outputs], dim=-1)
         return outputs
 
     def get_losses(
@@ -262,10 +309,21 @@ class YOLOXHead(nn.Module):
         outputs,
         origin_preds,
         dtype,
+        dist_outputs=None,  # NEW: list of distance outputs from each level
     ):
         bbox_preds = outputs[:, :, :4]  # [batch, n_anchors_all, 4]
         obj_preds = outputs[:, :, 4:5]  # [batch, n_anchors_all, 1]
         cls_preds = outputs[:, :, 5:]  # [batch, n_anchors_all, n_cls]
+
+        # NEW: flatten distance predictions to match anchor layout
+        if dist_outputs is not None:
+            dist_preds_flat = []
+            for d in dist_outputs:
+                B, _, H, W = d.shape
+                dist_preds_flat.append(d.view(B, 1, H * W).permute(0, 2, 1))
+            dist_preds_all = torch.cat(dist_preds_flat, dim=1)  # [B, n_anchors_all, 1]
+        else:
+            dist_preds_all = None
 
         # calculate targets
         nlabel = (labels.sum(dim=2) > 0).sum(dim=1)  # number of objects
@@ -282,6 +340,7 @@ class YOLOXHead(nn.Module):
         l1_targets = []
         obj_targets = []
         fg_masks = []
+        dist_targets = []   # NEW
 
         num_fg = 0.0
         num_gts = 0.0
@@ -295,6 +354,7 @@ class YOLOXHead(nn.Module):
                 l1_target = outputs.new_zeros((0, 4))
                 obj_target = outputs.new_zeros((total_num_anchors, 1))
                 fg_mask = outputs.new_zeros(total_num_anchors).bool()
+                dist_target = outputs.new_zeros((0,)) if labels.shape[-1] > 5 else None  # NEW
             else:
                 gt_bboxes_per_image = labels[batch_idx, :num_gt, 1:5]
                 gt_classes = labels[batch_idx, :num_gt, 0]
@@ -358,6 +418,13 @@ class YOLOXHead(nn.Module):
                 ) * pred_ious_this_matching.unsqueeze(-1)
                 obj_target = fg_mask.unsqueeze(-1)
                 reg_target = gt_bboxes_per_image[matched_gt_inds]
+
+                # NEW: distance targets (column 5 of labels, if present)
+                if labels.shape[-1] > 5:
+                    gt_distances_per_image = labels[batch_idx, :num_gt, 5]
+                    dist_target = gt_distances_per_image[matched_gt_inds]
+                else:
+                    dist_target = None
                 if self.use_l1:
                     l1_target = self.get_l1_target(
                         outputs.new_zeros((num_fg_img, 4)),
@@ -371,6 +438,8 @@ class YOLOXHead(nn.Module):
             reg_targets.append(reg_target)
             obj_targets.append(obj_target.to(dtype))
             fg_masks.append(fg_mask)
+            if labels.shape[-1] > 5 and dist_target is not None:
+                dist_targets.append(dist_target)
             if self.use_l1:
                 l1_targets.append(l1_target)
 
@@ -378,6 +447,8 @@ class YOLOXHead(nn.Module):
         reg_targets = torch.cat(reg_targets, 0)
         obj_targets = torch.cat(obj_targets, 0)
         fg_masks = torch.cat(fg_masks, 0)
+        # if self.use_distance:
+        #     dist_targets = torch.cat(dist_targets, 0)
         if self.use_l1:
             l1_targets = torch.cat(l1_targets, 0)
 
@@ -400,8 +471,16 @@ class YOLOXHead(nn.Module):
         else:
             loss_l1 = 0.0
 
+        # NEW: distance loss (only if distance labels are provided)
+        if dist_preds_all is not None and len(dist_targets) > 0:
+            dist_targets_cat = torch.cat(dist_targets, 0)
+            dist_pred_fg = F.relu(dist_preds_all.view(-1, 1)[fg_masks].squeeze(-1))
+            loss_dist = self.dist_loss(dist_pred_fg, dist_targets_cat).sum() / num_fg
+        else:
+            loss_dist = torch.tensor(0.0).to(dtype)
+
         reg_weight = 5.0
-        loss = reg_weight * loss_iou + loss_obj + loss_cls + loss_l1
+        loss = reg_weight * loss_iou + loss_obj + loss_cls + loss_l1 + self.dist_weight * loss_dist
 
         return (
             loss,
@@ -410,6 +489,7 @@ class YOLOXHead(nn.Module):
             loss_cls,
             loss_l1,
             num_fg / max(num_gts, 1),
+            self.dist_weight * loss_dist,   # NEW: 7th return value
         )
 
     def get_l1_target(self, l1_target, gt, stride, x_shifts, y_shifts, eps=1e-8):

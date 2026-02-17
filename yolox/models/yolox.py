@@ -31,9 +31,13 @@ class YOLOX(nn.Module):
 
         if self.training:
             assert targets is not None
-            loss, iou_loss, conf_loss, cls_loss, l1_loss, num_fg = self.head(
-                fpn_outs, targets, x
-            )
+            result = self.head(fpn_outs, targets, x)
+            # Handle both original (6 values) and distance-extended (7 values)
+            if len(result) == 7:
+                loss, iou_loss, conf_loss, cls_loss, l1_loss, num_fg, dist_loss = result
+            else:
+                loss, iou_loss, conf_loss, cls_loss, l1_loss, num_fg = result
+                dist_loss = 0.0
             outputs = {
                 "total_loss": loss,
                 "iou_loss": iou_loss,
@@ -41,6 +45,7 @@ class YOLOX(nn.Module):
                 "conf_loss": conf_loss,
                 "cls_loss": cls_loss,
                 "num_fg": num_fg,
+                "dist_loss": dist_loss,     # NEW
             }
         else:
             outputs = self.head(fpn_outs)
