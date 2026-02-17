@@ -1,249 +1,254 @@
-<div align="center"><img src="assets/logo.png" width="350"></div>
-<img src="assets/demo.png" >
+# YOLOX with Distance Estimation Head
 
-## Introduction
-YOLOX is an anchor-free version of YOLO, with a simpler design but better performance! It aims to bridge the gap between research and industrial communities.
-For more details, please refer to our [report on Arxiv](https://arxiv.org/abs/2107.08430).
+This repository extends [YOLOX](https://arxiv.org/abs/2107.08430) (an anchor-free object detector) with a **distance regression head** for estimating the real-world distance to detected objects. The primary use case demonstrated here is stop sign distance estimation for autonomous driving applications.
 
-This repo is an implementation of PyTorch version YOLOX, there is also a [MegEngine implementation](https://github.com/MegEngine/YOLOX).
+The distance head is a lightweight addition to the standard YOLOX architecture — it shares the backbone and FPN features and adds a single regression branch that predicts distance in meters for each detected object.
 
-<img src="assets/git_fig.png" width="1000" >
+---
 
-## Updates!!
-* 【2023/02/28】 We support assignment visualization tool, see doc [here](./docs/assignment_visualization.md).
-* 【2022/04/14】 We support jit compile op.
-* 【2021/08/19】 We optimize the training process with **2x** faster training and **~1%** higher performance! See [notes](docs/updates_note.md) for more details.
-* 【2021/08/05】 We release [MegEngine version YOLOX](https://github.com/MegEngine/YOLOX).
-* 【2021/07/28】 We fix the fatal error of [memory leak](https://github.com/Megvii-BaseDetection/YOLOX/issues/103)
-* 【2021/07/26】 We now support [MegEngine](https://github.com/Megvii-BaseDetection/YOLOX/tree/main/demo/MegEngine) deployment.
-* 【2021/07/20】 We have released our technical report on [Arxiv](https://arxiv.org/abs/2107.08430).
+## Installation
 
-## Benchmark
+**Prerequisites:** Python ≥ 3.7, PyTorch ≥ 1.7
 
-#### Standard Models.
+**Step 1.** Clone the repository.
 
-|Model |size |mAP<sup>val<br>0.5:0.95 |mAP<sup>test<br>0.5:0.95 | Speed V100<br>(ms) | Params<br>(M) |FLOPs<br>(G)| weights |
-| ------        |:---: | :---:    | :---:       |:---:     |:---:  | :---: | :----: |
-|[YOLOX-s](./exps/default/yolox_s.py)    |640  |40.5 |40.5      |9.8      |9.0 | 26.8 | [github](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.pth) |
-|[YOLOX-m](./exps/default/yolox_m.py)    |640  |46.9 |47.2      |12.3     |25.3 |73.8| [github](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.pth) |
-|[YOLOX-l](./exps/default/yolox_l.py)    |640  |49.7 |50.1      |14.5     |54.2| 155.6 | [github](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_l.pth) |
-|[YOLOX-x](./exps/default/yolox_x.py)   |640   |51.1 |**51.5**  | 17.3    |99.1 |281.9 | [github](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_x.pth) |
-|[YOLOX-Darknet53](./exps/default/yolov3.py)   |640  | 47.7 | 48.0 | 11.1 |63.7 | 185.3 | [github](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_darknet.pth) |
-
-<details>
-<summary>Legacy models</summary>
-
-|Model |size |mAP<sup>test<br>0.5:0.95 | Speed V100<br>(ms) | Params<br>(M) |FLOPs<br>(G)| weights |
-| ------        |:---: | :---:       |:---:     |:---:  | :---: | :----: |
-|[YOLOX-s](./exps/default/yolox_s.py)    |640  |39.6      |9.8     |9.0 | 26.8 | [onedrive](https://megvii-my.sharepoint.cn/:u:/g/personal/gezheng_megvii_com/EW62gmO2vnNNs5npxjzunVwB9p307qqygaCkXdTO88BLUg?e=NMTQYw)/[github](https://github.com/Megvii-BaseDetection/storage/releases/download/0.0.1/yolox_s.pth) |
-|[YOLOX-m](./exps/default/yolox_m.py)    |640  |46.4      |12.3     |25.3 |73.8| [onedrive](https://megvii-my.sharepoint.cn/:u:/g/personal/gezheng_megvii_com/ERMTP7VFqrVBrXKMU7Vl4TcBQs0SUeCT7kvc-JdIbej4tQ?e=1MDo9y)/[github](https://github.com/Megvii-BaseDetection/storage/releases/download/0.0.1/yolox_m.pth) |
-|[YOLOX-l](./exps/default/yolox_l.py)    |640  |50.0  |14.5 |54.2| 155.6 | [onedrive](https://megvii-my.sharepoint.cn/:u:/g/personal/gezheng_megvii_com/EWA8w_IEOzBKvuueBqfaZh0BeoG5sVzR-XYbOJO4YlOkRw?e=wHWOBE)/[github](https://github.com/Megvii-BaseDetection/storage/releases/download/0.0.1/yolox_l.pth) |
-|[YOLOX-x](./exps/default/yolox_x.py)   |640  |**51.2**      | 17.3 |99.1 |281.9 | [onedrive](https://megvii-my.sharepoint.cn/:u:/g/personal/gezheng_megvii_com/EdgVPHBziOVBtGAXHfeHI5kBza0q9yyueMGdT0wXZfI1rQ?e=tABO5u)/[github](https://github.com/Megvii-BaseDetection/storage/releases/download/0.0.1/yolox_x.pth) |
-|[YOLOX-Darknet53](./exps/default/yolov3.py)   |640  | 47.4      | 11.1 |63.7 | 185.3 | [onedrive](https://megvii-my.sharepoint.cn/:u:/g/personal/gezheng_megvii_com/EZ-MV1r_fMFPkPrNjvbJEMoBLOLAnXH-XKEB77w8LhXL6Q?e=mf6wOc)/[github](https://github.com/Megvii-BaseDetection/storage/releases/download/0.0.1/yolox_darknet53.pth) |
-
-</details>
-
-#### Light Models.
-
-|Model |size |mAP<sup>val<br>0.5:0.95 | Params<br>(M) |FLOPs<br>(G)| weights |
-| ------        |:---:  |  :---:       |:---:     |:---:  | :---: |
-|[YOLOX-Nano](./exps/default/yolox_nano.py) |416  |25.8  | 0.91 |1.08 | [github](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth) |
-|[YOLOX-Tiny](./exps/default/yolox_tiny.py) |416  |32.8 | 5.06 |6.45 | [github](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.pth) |
-
-
-<details>
-<summary>Legacy models</summary>
-
-|Model |size |mAP<sup>val<br>0.5:0.95 | Params<br>(M) |FLOPs<br>(G)| weights |
-| ------        |:---:  |  :---:       |:---:     |:---:  | :---: |
-|[YOLOX-Nano](./exps/default/yolox_nano.py) |416  |25.3  | 0.91 |1.08 | [github](https://github.com/Megvii-BaseDetection/storage/releases/download/0.0.1/yolox_nano.pth) |
-|[YOLOX-Tiny](./exps/default/yolox_tiny.py) |416  |32.8 | 5.06 |6.45 | [github](https://github.com/Megvii-BaseDetection/storage/releases/download/0.0.1/yolox_tiny_32dot8.pth) |
-
-</details>
-
-## Quick Start
-
-<details>
-<summary>Installation</summary>
-
-Step1. Install YOLOX from source.
-```shell
-git clone git@github.com:Megvii-BaseDetection/YOLOX.git
-cd YOLOX
-pip3 install -v -e .  # or  python3 setup.py develop
+```bash
+git clone <your-repo-url>
 ```
 
-</details>
+**Step 2.** Install YOLOX and its dependencies.
 
-<details>
-<summary>Demo</summary>
-
-Step1. Download a pretrained model from the benchmark table.
-
-Step2. Use either -n or -f to specify your detector's config. For example:
-
-```shell
-python tools/demo.py image -n yolox-s -c /path/to/your/yolox_s.pth --path assets/dog.jpg --conf 0.25 --nms 0.45 --tsize 640 --save_result --device [cpu/gpu]
-```
-or
-```shell
-python tools/demo.py image -f exps/default/yolox_s.py -c /path/to/your/yolox_s.pth --path assets/dog.jpg --conf 0.25 --nms 0.45 --tsize 640 --save_result --device [cpu/gpu]
-```
-Demo for video:
-```shell
-python tools/demo.py video -n yolox-s -c /path/to/your/yolox_s.pth --path /path/to/your/video --conf 0.25 --nms 0.45 --tsize 640 --save_result --device [cpu/gpu]
+```bash
+pip install -v -e .
 ```
 
+This installs the package in development mode so that local changes take effect immediately. Core dependencies (listed in `requirements.txt`) include numpy, torch, torchvision, opencv-python, loguru, pycocotools, and onnx.
 
-</details>
+**Step 3.** Download pretrained YOLOX weights.
 
-<details>
-<summary>Reproduce our results on COCO</summary>
+The distance training script initializes from a standard YOLOX checkpoint. Download YOLOX-s weights (or another variant) from the table below:
 
-Step1. Prepare COCO dataset
-```shell
-cd <YOLOX_HOME>
-ln -s /path/to/your/COCO ./datasets/COCO
+| Model | Params | mAP (val) | Weights |
+|-------|--------|-----------|---------|
+| YOLOX-s | 9.0M | 40.5 | [download](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.pth) |
+| YOLOX-m | 25.3M | 46.9 | [download](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_m.pth) |
+| YOLOX-l | 54.2M | 49.7 | [download](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_l.pth) |
+| YOLOX-x | 99.1M | 51.1 | [download](https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_x.pth) |
+
+```bash
+mkdir -p weights
+wget -O weights/yolox_s.pth https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.pth
 ```
 
-Step2. Reproduce our results on COCO by specifying -n:
+---
 
-```shell
-python -m yolox.tools.train -n yolox-s -d 8 -b 64 --fp16 -o [--cache]
-                               yolox-m
-                               yolox-l
-                               yolox-x
-```
-* -d: number of gpu devices
-* -b: total batch size, the recommended number for -b is num-gpu * 8
-* --fp16: mixed precision training
-* --cache: caching imgs into RAM to accelarate training, which need large system RAM.
+## Custom Dataset Format
 
+The distance training pipeline uses a **CSV annotation file** paired with an **image directory**. No COCO-format JSON is required.
 
+### CSV Structure
 
-When using -f, the above commands are equivalent to:
-```shell
-python -m yolox.tools.train -f exps/default/yolox_s.py -d 8 -b 64 --fp16 -o [--cache]
-                               exps/default/yolox_m.py
-                               exps/default/yolox_l.py
-                               exps/default/yolox_x.py
-```
+The CSV must contain the following columns (with a header row):
 
-**Multi Machine Training**
+| Column | Type | Description |
+|--------|------|-------------|
+| `image_path` | string | Relative path from `--img-dir` to the image file |
+| `x_min` | float | Left edge of the bounding box (pixels, original image coordinates) |
+| `y_min` | float | Top edge of the bounding box (pixels) |
+| `x_max` | float | Right edge of the bounding box (pixels) |
+| `y_max` | float | Bottom edge of the bounding box (pixels) |
+| `class` | string | Class label (e.g., `stop_sign`) — currently all boxes are mapped to class 0 internally |
+| `distance_m` | float | Ground-truth distance to the object in meters |
 
-We also support multi-nodes training. Just add the following args:
-* --num\_machines: num of your total training nodes
-* --machine\_rank: specify the rank of each node
+### Example CSV
 
-Suppose you want to train YOLOX on 2 machines, and your master machines's IP is 123.123.123.123, use port 12312 and TCP.
-
-On master machine, run
-```shell
-python tools/train.py -n yolox-s -b 128 --dist-url tcp://123.123.123.123:12312 --num_machines 2 --machine_rank 0
-```
-On the second machine, run
-```shell
-python tools/train.py -n yolox-s -b 128 --dist-url tcp://123.123.123.123:12312 --num_machines 2 --machine_rank 1
+```csv
+image_path,x_min,y_min,x_max,y_max,class,distance_m
+images/img001.jpg,69,74,1200,1205,stop_sign,7.1
+images/img002.jpg,236,186,1168,1244,stop_sign,7.4
+images/img003.jpg,224,38,836,711,stop_sign,9.7
+images/img004.jpg,594,95,714,230,stop_sign,35.0
+images/img005.jpg,189,20,457,289,stop_sign,19.2
 ```
 
-**Logging to Weights & Biases**
+### Directory Layout
 
-To log metrics, predictions and model checkpoints to [W&B](https://docs.wandb.ai/guides/integrations/other/yolox) use the command line argument `--logger wandb` and use the prefix "wandb-" to specify arguments for initializing the wandb run.
-
-```shell
-python tools/train.py -n yolox-s -d 8 -b 64 --fp16 -o [--cache] --logger wandb wandb-project <project name>
-                         yolox-m
-                         yolox-l
-                         yolox-x
+```
+data/
+└── stopsigns/
+    ├── annotations.csv
+    └── images/
+        ├── img001.jpg
+        ├── img002.jpg
+        └── ...
 ```
 
-An example wandb dashboard is available [here](https://wandb.ai/manan-goel/yolox-nano/runs/3pzfeom0)
+The `image_path` column values are joined with the `--img-dir` argument to locate each file. For example, if `--img-dir data/stopsigns/` and `image_path` is `images/img001.jpg`, the loader reads `data/stopsigns/images/img001.jpg`.
 
-**Others**
+### Multiple Annotations Per Image
 
-See more information with the following command:
-```shell
-python -m yolox.tools.train --help
+A single image can have multiple rows in the CSV (one per bounding box). The dataset loader groups annotations by `image_path` automatically.
+
+### An included example dataset
+
+A small example annotation file is provided at `yolox/data/stopsigns/annotations.csv` with 10 stop sign images for reference.
+
+---
+
+## Training the Distance Head
+
+The training script (`tools/train_distance.py`) uses a two-phase strategy:
+
+1. **Phase 1 (epochs 0 → `unfreeze-epoch`):** Only the distance regression branch is trained. The backbone and detection head are frozen, so the pretrained detection performance is preserved.
+2. **Phase 2 (epochs `unfreeze-epoch` → end):** All parameters are unfrozen for end-to-end fine-tuning with a reduced learning rate.
+
+### Basic Training Command
+
+```bash
+python tools/train_distance.py \
+    --ckpt weights/yolox_s.pth \
+    --csv data/stopsigns/annotations.csv \
+    --img-dir data/stopsigns/ \
+    --epochs 10 \
+    --batch-size 8 \
+    --lr 1e-3 \
+    --output-dir runs/distance_training
 ```
 
-</details>
+### Training Arguments
 
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--ckpt` | *required* | Path to pretrained YOLOX checkpoint |
+| `--csv` | *required* | Path to CSV annotation file |
+| `--img-dir` | *required* | Root directory for images |
+| `--epochs` | 100 | Total training epochs |
+| `--batch-size` | 8 | Batch size |
+| `--lr` | 1e-3 | Initial learning rate |
+| `--img-size` | 640 | Input image size (images are letterboxed to this square) |
+| `--output-dir` | `runs/distance_training` | Directory for checkpoints |
+| `--unfreeze-epoch` | 50 | Epoch at which to unfreeze backbone for fine-tuning |
+| `--device` | auto | `cuda` or `cpu` (auto-detects GPU) |
 
-<details>
-<summary>Evaluation</summary>
+### Outputs
 
-We support batch testing for fast evaluation:
+Training produces two checkpoint files in `--output-dir`:
 
-```shell
-python -m yolox.tools.eval -n  yolox-s -c yolox_s.pth -b 64 -d 8 --conf 0.001 [--fp16] [--fuse]
-                               yolox-m
-                               yolox-l
-                               yolox-x
+- `best_ckpt.pth` — checkpoint with the lowest training loss
+- `latest_ckpt.pth` — checkpoint from the most recent epoch
+
+---
+
+## Inference with Distance Estimation
+
+Use `tools/infer_distance.py` to run detection + distance estimation on images.
+
+### Basic Inference Command
+
+```bash
+python tools/infer_distance.py \
+    --ckpt runs/distance_training/best_ckpt.pth \
+    --img test_images/img001.jpg \
+    --output-dir runs/results
 ```
-* --fuse: fuse conv and bn
-* -d: number of GPUs used for evaluation. DEFAULT: All GPUs available will be used.
-* -b: total batch size across on all GPUs
 
-To reproduce speed test, we use the following command:
-```shell
-python -m yolox.tools.eval -n  yolox-s -c yolox_s.pth -b 1 -d 1 --conf 0.001 --fp16 --fuse
-                               yolox-m
-                               yolox-l
-                               yolox-x
+To run on an entire directory of images:
+
+```bash
+python tools/infer_distance.py \
+    --ckpt runs/distance_training/best_ckpt.pth \
+    --img test_images/ \
+    --output-dir runs/results
 ```
 
-</details>
+### Inference Arguments
 
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--ckpt` | *required* | Path to trained checkpoint |
+| `--img` | *required* | Image file or directory of images |
+| `--output-dir` | `runs/results` | Directory for annotated output images |
+| `--conf` | 0.3 | Confidence threshold |
+| `--nms` | 0.45 | NMS IoU threshold |
+| `--img-size` | 640 | Input image size |
+| `--device` | auto | `cuda` or `cpu` |
+| `--stop-sign-only` | off | Only display stop sign detections |
 
-<details>
-<summary>Tutorials</summary>
+### Output
 
-*  [Training on custom data](docs/train_custom_data.md)
-*  [Caching for custom data](docs/cache.md)
-*  [Manipulating training image size](docs/manipulate_training_image_size.md)
-*  [Assignment visualization](docs/assignment_visualization.md)
-*  [Freezing model](docs/freeze_module.md)
+Each input image is saved to `--output-dir` with bounding boxes drawn. Stop sign detections include the estimated distance in the label (e.g., `stop_sign 0.95 | 12.3m`). Other COCO classes are detected with standard bounding boxes but without distance labels.
 
-</details>
+---
 
-## Deployment
+## Standard YOLOX Usage
 
+The original YOLOX detection pipeline is fully preserved. You can run standard detection, training, evaluation, and export as described below.
 
-1. [MegEngine in C++ and Python](./demo/MegEngine)
-2. [ONNX export and an ONNXRuntime](./demo/ONNXRuntime)
-3. [TensorRT in C++ and Python](./demo/TensorRT)
-4. [ncnn in C++ and Java](./demo/ncnn)
-5. [OpenVINO in C++ and Python](./demo/OpenVINO)
-6. [Accelerate YOLOX inference with nebullvm in Python](./demo/nebullvm)
+### Demo (Detection Only)
 
-## Third-party resources
-* YOLOX for streaming perception: [StreamYOLO (CVPR 2022 Oral)](https://github.com/yancie-yjr/StreamYOLO)
-* The YOLOX-s and YOLOX-nano are Integrated into [ModelScope](https://www.modelscope.cn/home). Try out the Online Demo at [YOLOX-s](https://www.modelscope.cn/models/damo/cv_cspnet_image-object-detection_yolox/summary) and [YOLOX-Nano](https://www.modelscope.cn/models/damo/cv_cspnet_image-object-detection_yolox_nano_coco/summary) respectively 🚀.
-* Integrated into [Huggingface Spaces 🤗](https://huggingface.co/spaces) using [Gradio](https://github.com/gradio-app/gradio). Try out the Web Demo: [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/Sultannn/YOLOX-Demo)
-* The ncnn android app with video support: [ncnn-android-yolox](https://github.com/FeiGeChuanShu/ncnn-android-yolox) from [FeiGeChuanShu](https://github.com/FeiGeChuanShu)
-* YOLOX with Tengine support: [Tengine](https://github.com/OAID/Tengine/blob/tengine-lite/examples/tm_yolox.cpp) from [BUG1989](https://github.com/BUG1989)
-* YOLOX + ROS2 Foxy: [YOLOX-ROS](https://github.com/Ar-Ray-code/YOLOX-ROS) from [Ar-Ray](https://github.com/Ar-Ray-code)
-* YOLOX Deploy DeepStream: [YOLOX-deepstream](https://github.com/nanmi/YOLOX-deepstream) from [nanmi](https://github.com/nanmi)
-* YOLOX MNN/TNN/ONNXRuntime: [YOLOX-MNN](https://github.com/DefTruth/lite.ai.toolkit/blob/main/lite/mnn/cv/mnn_yolox.cpp)、[YOLOX-TNN](https://github.com/DefTruth/lite.ai.toolkit/blob/main/lite/tnn/cv/tnn_yolox.cpp) and [YOLOX-ONNXRuntime C++](https://github.com/DefTruth/lite.ai.toolkit/blob/main/lite/ort/cv/yolox.cpp) from [DefTruth](https://github.com/DefTruth)
-* Converting darknet or yolov5 datasets to COCO format for YOLOX: [YOLO2COCO](https://github.com/RapidAI/YOLO2COCO) from [Daniel](https://github.com/znsoftm)
+```bash
+# Image
+python tools/demo.py image -n yolox-s -c weights/yolox_s.pth \
+    --path assets/dog.jpg --conf 0.25 --nms 0.45 --tsize 640 \
+    --save_result --device cpu
 
-## Cite YOLOX
-If you use YOLOX in your research, please cite our work by using the following BibTeX entry:
-
-```latex
- @article{yolox2021,
-  title={YOLOX: Exceeding YOLO Series in 2021},
-  author={Ge, Zheng and Liu, Songtao and Wang, Feng and Li, Zeming and Sun, Jian},
-  journal={arXiv preprint arXiv:2107.08430},
-  year={2021}
-}
+# Video
+python tools/demo.py video -n yolox-s -c weights/yolox_s.pth \
+    --path /path/to/video --conf 0.25 --nms 0.45 --tsize 640 \
+    --save_result --device gpu
 ```
-## In memory of Dr. Jian Sun
-Without the guidance of [Dr. Jian Sun](https://scholar.google.com/citations?user=ALVSZAYAAAAJ), YOLOX would not have been released and open sourced to the community.
-The passing away of Dr. Sun is a huge loss to the Computer Vision field. We add this section here to express our remembrance and condolences to our captain Dr. Sun.
-It is hoped that every AI practitioner in the world will stick to the belief of "continuous innovation to expand cognitive boundaries, and extraordinary technology to achieve product value" and move forward all the way.
 
-<div align="center"><img src="assets/sunjian.png" width="200"></div>
-没有孙剑博士的指导，YOLOX也不会问世并开源给社区使用。
-孙剑博士的离去是CV领域的一大损失，我们在此特别添加了这个部分来表达对我们的“船长”孙老师的纪念和哀思。
-希望世界上的每个AI从业者秉持着“持续创新拓展认知边界，非凡科技成就产品价值”的观念，一路向前。
+### Training on COCO
+
+```bash
+# Link your COCO dataset
+ln -s /path/to/COCO ./datasets/COCO
+
+# Train YOLOX-s on 8 GPUs
+python -m yolox.tools.train -n yolox-s -d 8 -b 64 --fp16 -o
+```
+
+### Evaluation
+
+```bash
+python -m yolox.tools.eval -n yolox-s -c yolox_s.pth -b 64 -d 8 --conf 0.001 --fp16 --fuse
+```
+
+### Export to ONNX
+
+```bash
+python tools/export_onnx.py -n yolox-s -c weights/yolox_s.pth --output-name yolox_s.onnx
+```
+
+---
+
+## Project Structure
+
+```
+YOLOX/
+├── tools/
+│   ├── train_distance.py      # Train distance regression head
+│   ├── infer_distance.py      # Inference with distance estimation
+│   ├── train.py               # Standard YOLOX training
+│   ├── demo.py                # Standard detection demo
+│   ├── eval.py                # COCO evaluation
+│   ├── export_onnx.py         # ONNX export
+│   └── export_torchscript.py  # TorchScript export
+├── yolox/
+│   ├── models/                # Network architecture (backbone, FPN, head)
+│   ├── data/
+│   │   ├── datasets/
+│   │   │   ├── stopsign_distance.py  # Distance dataset loader
+│   │   │   └── ...
+│   │   └── stopsigns/
+│   │       └── annotations.csv       # Example annotations
+│   ├── core/                  # Training loop, launcher
+│   └── utils/                 # Checkpointing, visualization, etc.
+├── exps/                      # Experiment config files
+├── weights/                   # Store pretrained weights here
+└── requirements.txt
+```
+
+---
+
+## Citation
