@@ -275,7 +275,7 @@ def maybe_unfreeze_gradual(model, optimizer, epoch, args):
     changed = False
 
     if epoch == args.unfreeze_head_epoch:
-        logger.info(f"=== Epoch {epoch}: Unfreezing detection head ===")
+        logger.info(f"=== Epoch {epoch + 1}: Unfreezing detection head ===")
         unfreeze_detection_head(model)
         _add_new_params_to_optimizer(
             optimizer, model, args.lr, group_name="detection_head"
@@ -283,7 +283,7 @@ def maybe_unfreeze_gradual(model, optimizer, epoch, args):
         changed = True
 
     if epoch == args.unfreeze_neck_epoch:
-        logger.info(f"=== Epoch {epoch}: Unfreezing FPN/PAN neck ===")
+        logger.info(f"=== Epoch {epoch + 1}: Unfreezing FPN/PAN neck ===")
         unfreeze_neck(model)
         _add_new_params_to_optimizer(
             optimizer, model, args.lr * 0.5, group_name="neck"
@@ -291,7 +291,7 @@ def maybe_unfreeze_gradual(model, optimizer, epoch, args):
         changed = True
 
     if epoch == args.unfreeze_backbone_epoch:
-        logger.info(f"=== Epoch {epoch}: Unfreezing backbone ===")
+        logger.info(f"=== Epoch {epoch + 1}: Unfreezing backbone ===")
         unfreeze_backbone(model)
         _add_new_params_to_optimizer(
             optimizer, model, args.lr * 0.1, group_name="backbone"
@@ -342,9 +342,22 @@ def validate(model, dataloader, device):
     Run one pass over the validation set and return average distance loss.
     The model is set to train mode (so YOLOX.forward computes losses),
     but no gradients are computed.
+
+    All BN layers are forced to eval mode so that validation data does not
+    corrupt running_mean / running_var (torch.no_grad() does NOT prevent this).
     """
     model.train()
-    set_frozen_modules_eval(model)
+
+    # Save each BN module's training flag, then set all to eval so that
+    # running statistics are never updated with validation data.
+    bn_types = (
+        nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.SyncBatchNorm,
+    )
+    bn_states = {}
+    for name, module in model.named_modules():
+        if isinstance(module, bn_types):
+            bn_states[name] = module.training
+            module.eval()
 
     total_dist_loss = 0.0
     total_loss = 0.0
@@ -359,6 +372,11 @@ def validate(model, dataloader, device):
         if isinstance(dist_loss, torch.Tensor):
             total_dist_loss += dist_loss.item()
         n_batches += 1
+
+    # Restore BN training flags
+    for name, module in model.named_modules():
+        if isinstance(module, bn_types) and name in bn_states:
+            module.train(bn_states[name])
 
     avg_loss = total_loss / max(n_batches, 1)
     avg_dist = total_dist_loss / max(n_batches, 1)
@@ -423,6 +441,9 @@ def main():
     # Loss weighting
     parser.add_argument("--dist-weight", type=float, default=1.0,
                         help="Weight for distance loss (model.head.dist_weight)")
+    parser.add_argument("--mean-dist", type=float, default=12.0,
+                        help="Approximate mean distance (m) of your dataset, used to "
+                             "initialise the distance head bias via inverse-softplus")
     parser.add_argument("--freeze-det-loss", action="store_true",
                         help="Even in modes that unfreeze the head, only backprop "
                              "through the distance loss (experimental)")
@@ -442,13 +463,12 @@ def main():
     logger.info("Loaded pretrained weights (distance layers initialized randomly)")
 
     # ── Initialize distance bias to sensible value ───────────────────
-    mean_dist = 12.0  # approximate mean of your dataset; adjust if needed
-    inverse_softplus = math.log(math.exp(mean_dist) - 1.0)
+    inverse_softplus = math.log(math.exp(args.mean_dist) - 1.0)
     with torch.no_grad():
         for pred_layer in model.head.dist_preds:
             pred_layer.bias.fill_(inverse_softplus)
     logger.info(
-        f"Initialized distance bias to inverse_softplus({mean_dist}) = {inverse_softplus:.2f}"
+        f"Initialized distance bias to inverse_softplus({args.mean_dist}) = {inverse_softplus:.2f}"
     )
 
     # ── Set distance loss weight ─────────────────────────────────────
@@ -472,7 +492,7 @@ def main():
         shuffle=True,
         num_workers=args.num_workers,
         collate_fn=collate_fn,
-        drop_last=False,
+        drop_last=True,
     )
     logger.info(f"Train dataset: {len(train_dataset)} images, {len(train_loader)} batches")
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) Megvii Inc. All rights reserved.
+#boxes.py
 
 import numpy as np
 
@@ -30,6 +31,13 @@ def filter_box(output, scale_range):
 
 
 def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45, class_agnostic=False):
+    # --- Strip distance channel if present (5 + num_classes + 1) ---
+    expected_channels = 5 + num_classes
+    has_distance = prediction.shape[2] > expected_channels
+    if has_distance:
+        dist_channel = prediction[:, :, expected_channels:]  # save distance
+        prediction = prediction[:, :, :expected_channels]     # strip it
+
     box_corner = prediction.new(prediction.shape)
     box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
     box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
@@ -68,6 +76,9 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45, class_agn
             )
 
         detections = detections[nms_out_index]
+        if has_distance:
+            surviving_dists = dist_channel[i, nms_out_index].unsqueeze(1)
+            detections = torch.cat([detections, surviving_dists], 1)
         if output[i] is None:
             output[i] = detections
         else:

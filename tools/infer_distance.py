@@ -102,12 +102,9 @@ def main():
             raw_output = model(tensor)
 
         # raw_output shape: [1, N_anchors, 4+1+80+1]
-        # Last channel is distance
-        det_output = raw_output[:, :, :-1]   # [1, N, 85]
-        dist_output = raw_output[:, :, -1]   # [1, N]
-
-        # NMS on detection output
-        results = postprocess(det_output, num_classes=80,
+        # postprocess handles distance internally; surviving detections have
+        # output columns: [x1, y1, x2, y2, obj_conf, class_conf, class_id, dist]
+        results = postprocess(raw_output, num_classes=80,
                               conf_thre=args.conf, nms_thre=args.nms)
 
         if results[0] is None:
@@ -117,14 +114,7 @@ def main():
         bboxes = results[0][:, :4]    # x1, y1, x2, y2
         scores = results[0][:, 4] * results[0][:, 5]  # obj_conf * cls_conf
         classes = results[0][:, 6].int()
-
-        # For each detection, find its distance
-        # results[0] comes from postprocess which sorts by score
-        # We need the anchor indices — postprocess doesn't return them,
-        # so we match back by bounding box coordinates.
-        # Simpler: index into dist_output by NMS-surviving indices
-        # Since postprocess modifies indices, we re-extract from raw_output:
-        all_dists = dist_output[0].cpu().numpy()
+        distances = results[0][:, 7]  # distance in metres, appended by postprocess
 
         # Draw results
         vis_img = img.copy()
@@ -139,17 +129,7 @@ def main():
             score = scores[i].item()
             cls_name = COCO_CLASSES[cls_id]
 
-            # Get distance for this detection
-            # Use center of bbox to find nearest anchor
-            cx = (bboxes[i][0] + bboxes[i][2]) / 2
-            cy = (bboxes[i][1] + bboxes[i][3]) / 2
-
-            # Find closest anchor in raw_output
-            raw_cx = raw_output[0, :, 0]  # decoded cx
-            raw_cy = raw_output[0, :, 1]  # decoded cy
-            dists_to_center = (raw_cx - cx)**2 + (raw_cy - cy)**2
-            nearest_idx = dists_to_center.argmin().item()
-            distance_m = all_dists[nearest_idx]
+            distance_m = distances[i].item()
 
             # Draw bounding box
             color = (0, 0, 255) if cls_id == STOP_SIGN_CLASS else (0, 255, 0)
