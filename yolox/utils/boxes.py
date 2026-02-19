@@ -77,7 +77,10 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45, class_agn
 
         detections = detections[nms_out_index]
         if has_distance:
-            surviving_dists = dist_channel[i, nms_out_index].unsqueeze(1)
+            # Apply the same conf_mask first (aligns with conf-filtered detections),
+            # then pick only the NMS-surviving rows.
+            # dist_channel[i] shape: [N_anchors, 1] -> [N_conf, 1] -> [N_surviving, 1]
+            surviving_dists = dist_channel[i][conf_mask][nms_out_index]
             detections = torch.cat([detections, surviving_dists], 1)
         if output[i] is None:
             output[i] = detections
