@@ -224,7 +224,7 @@ class YOLOXHead(nn.Module):
 
             else:
                 output = torch.cat(
-                    [reg_output, obj_output.sigmoid(), cls_output.sigmoid(), F.relu(dist_output)], 1 # NEW: add dist output with ReLU activation
+                    [reg_output, obj_output.sigmoid(), cls_output.sigmoid(), F.softplus(dist_output)], 1 # NEW: add dist output with ReLU activation
                 )
 
             outputs.append(output)
@@ -474,7 +474,7 @@ class YOLOXHead(nn.Module):
         # NEW: distance loss (only if distance labels are provided)
         if dist_preds_all is not None and len(dist_targets) > 0:
             dist_targets_cat = torch.cat(dist_targets, 0)
-            dist_pred_fg = F.relu(dist_preds_all.view(-1, 1)[fg_masks].squeeze(-1))
+            dist_pred_fg = F.softplus(dist_preds_all.view(-1, 1)[fg_masks].squeeze(-1))
             loss_dist = self.dist_loss(dist_pred_fg, dist_targets_cat).sum() / num_fg
         else:
             loss_dist = torch.tensor(0.0).to(dtype)

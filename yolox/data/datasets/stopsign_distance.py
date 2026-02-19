@@ -86,7 +86,7 @@ class StopSignDistanceDataset(Dataset):
             cy = (y1_s + y2_s) / 2.0
             w = x2_s - x1_s
             h = y2_s - y1_s
-            labels[i] = [0, cx, cy, w, h, dist]  # class 0 = stop_sign
+            labels[i] = [11, cx, cy, w, h, dist]  # class 11 = stop_sign
 
         return torch.from_numpy(padded), torch.from_numpy(labels)
 
