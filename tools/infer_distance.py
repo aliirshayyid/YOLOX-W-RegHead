@@ -147,7 +147,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
             print(f"  {cls_name}: bbox=({x1},{y1},{x2},{y2}) "
-                  f"conf={score:.3f} dist={distance_m:.1f}m")
+                  f"conf={score:.3f} dist={distance_m:.3f}m")
 
         # Save
         out_name = os.path.basename(img_path)

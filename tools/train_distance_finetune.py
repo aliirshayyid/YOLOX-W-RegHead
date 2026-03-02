@@ -22,16 +22,7 @@ Typical usage:
         --epochs 50 --lr 5e-4
 
     # Gradual unfreezing: distance first, then head, then full
-    python tools/train_distance_finetune.py \
-        --ckpt weights/yolox_s.pth \
-        --csv data/stopsigns/annotations.csv \
-        --img-dir data/stopsigns/ \
-        --mode gradual \
-        --epochs 100 \
-        --unfreeze-head-epoch 10 \
-        --unfreeze-neck-epoch 30 \
-        --unfreeze-backbone-epoch 60 \
-        --lr 1e-3
+    python tools/train_distance_finetune.py --ckpt weights/yolox_s.pth --csv data/stopsigns/annotations.csv --img-dir data/stopsigns/ --mode head_and_neck --epochs 100 --lr 1e-3
 """
 
 import argparse
@@ -399,7 +390,7 @@ def main():
 
     # Training
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--img-size", type=int, default=640)
     parser.add_argument("--output-dir", default="runs/distance_finetune")
@@ -441,7 +432,7 @@ def main():
     # Loss weighting
     parser.add_argument("--dist-weight", type=float, default=1.0,
                         help="Weight for distance loss (model.head.dist_weight)")
-    parser.add_argument("--mean-dist", type=float, default=12.0,
+    parser.add_argument("--mean-dist", type=float, default=0.6,
                         help="Approximate mean distance (m) of your dataset, used to "
                              "initialise the distance head bias via inverse-softplus")
     parser.add_argument("--freeze-det-loss", action="store_true",
